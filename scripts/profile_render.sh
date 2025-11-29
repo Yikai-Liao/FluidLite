@@ -6,8 +6,8 @@ if [[ $# -lt 2 ]]; then
   exit 1
 fi
 
-SF3_PATH="$1"
-MIDI_PATH="$2"
+SF3_PATH="$(realpath "$1")"
+MIDI_PATH="$(realpath "$2")"
 BUILD_DIR="${3:-build-gcc}"
 
 CMAKE_FLAGS=(
@@ -29,12 +29,22 @@ BASENAME=$(basename "$MIDI_PATH" .mid)
 TIME_LOG="${BASENAME}.time.log"
 PERF_DATA="${BASENAME}.perf.data"
 
-/usr/bin/time -f '%E real, %P cpu' -o "$TIME_LOG" ./fluidlite-cli "$SF3_PATH" "$MIDI_PATH"
+CLI_CMD=(./fluidlite-cli "$SF3_PATH" "$MIDI_PATH")
+
+if [[ -x /usr/bin/time ]]; then
+  /usr/bin/time -f '%E real, %P cpu' -o "$TIME_LOG" "${CLI_CMD[@]}"
+else
+  # Fall back to bash's builtin 'time' keyword and capture only the timing output
+  TIMEFORMAT=$'%E real, %P%% cpu'
+  {
+    time "${CLI_CMD[@]}" 2>&4
+  } 4>&2 2> "$TIME_LOG"
+fi
 
 echo "Timing result recorded in $TIME_LOG"
 
 echo "Collecting perf profile..."
-perf record -o "$PERF_DATA" -g ./fluidlite-cli "$SF3_PATH" "$MIDI_PATH"
+perf record -o "$PERF_DATA" -g "${CLI_CMD[@]}"
 echo "Perf data saved to $BUILD_DIR/$PERF_DATA"
 echo "Inspect with: perf report -i $BUILD_DIR/$PERF_DATA --call-graph=graph,0.5,caller --max-stack=15"
 
