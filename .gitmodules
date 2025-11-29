@@ -1,0 +1,6 @@
+[submodule "minimidi"]
+	path = minimidi
+	url = https://github.com/lzqlzzq/minimidi.git
+[submodule "libsndfile"]
+	path = libsndfile
+	url = https://github.com/libsndfile/libsndfile.git

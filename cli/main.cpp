@@ -32,6 +32,8 @@
 #include <getopt.h>
 #include <cstring>
 
+#include "output_format.hpp"
+
 namespace fs = std::filesystem;
 
 // Version info
@@ -48,6 +50,10 @@ namespace colors {
 }
 
 // Command line options
+using fluidlite_cli::ContainerFormat;
+using fluidlite_cli::containerFormatFromName;
+using fluidlite_cli::containerFormatName;
+
 struct Options {
     std::string soundfontPath;
     std::vector<std::string> midiFiles;
@@ -55,6 +61,7 @@ struct Options {
     int jobs = 1;
     uint32_t sampleRate = 44100;
     bool useFloat = false;  // Default to int16
+    ContainerFormat containerFormat = ContainerFormat::Wav;
     float gain = 0.2f;
     bool reverb = true;
     bool chorus = true;
@@ -74,7 +81,9 @@ void printUsage(const char* programName) {
               << "  -o, --output <dir>     Output directory (default: same as input)\n"
               << "  -j, --jobs <n>         Number of parallel jobs (default: 1)\n"
               << "  -r, --rate <hz>        Sample rate (default: 44100)\n"
-              << "  -f, --format <fmt>     Output format: f32 or s16 (default: s16)\n"
+              << "  -f, --format <fmt>     Output sample format: f32 or s16 (default: s16)\n"
+              << "  -Z, --container <fmt>  Output container (wav, flac, ogg, aiff, au, mp3)\n"
+              << "                         (default: wav)\n"
               << "  -g, --gain <value>     Master gain 0.0-10.0 (default: 0.2)\n"
               << "  --no-reverb            Disable reverb\n"
               << "  --no-chorus            Disable chorus\n"
@@ -82,7 +91,7 @@ void printUsage(const char* programName) {
               << "  -v, --verbose          Verbose output\n"
               << "  -h, --help             Show this help message\n"
               << "  --version              Show version information\n\n"
-              << "Output: WAV file (16-bit PCM or 32-bit float)\n\n"
+              << "Output: WAV/FLAC/OGG/AIFF/AU files (16-bit PCM or 32-bit float)\n\n"
               << "Examples:\n"
               << "  " << programName << " soundfont.sf2 music.mid\n"
               << "  " << programName << " -j 4 -o output/ font.sf2 *.mid\n"
@@ -100,6 +109,7 @@ bool parseArgs(int argc, char* argv[], Options& opts) {
         {"jobs",       required_argument, nullptr, 'j'},
         {"rate",       required_argument, nullptr, 'r'},
         {"format",     required_argument, nullptr, 'f'},
+        {"container",  required_argument, nullptr, 'Z'},
         {"gain",       required_argument, nullptr, 'g'},
         {"no-reverb",  no_argument,       nullptr, 'R'},
         {"no-chorus",  no_argument,       nullptr, 'C'},
@@ -113,7 +123,7 @@ bool parseArgs(int argc, char* argv[], Options& opts) {
     int opt;
     int optionIndex = 0;
     
-    while ((opt = getopt_long(argc, argv, "o:j:r:f:g:qvh", longOptions, &optionIndex)) != -1) {
+    while ((opt = getopt_long(argc, argv, "o:j:r:f:g:qvhZ:", longOptions, &optionIndex)) != -1) {
         switch (opt) {
             case 'o':
                 opts.outputDir = optarg;
@@ -139,6 +149,13 @@ bool parseArgs(int argc, char* argv[], Options& opts) {
                     opts.useFloat = false;
                 } else {
                     std::cerr << "Error: format must be 'f32' or 's16'\n";
+                    return false;
+                }
+                break;
+            case 'Z':
+                opts.containerFormat = containerFormatFromName(optarg);
+                if (opts.containerFormat == ContainerFormat::Unknown) {
+                    std::cerr << "Error: unsupported container format: " << optarg << "\n";
                     return false;
                 }
                 break;
@@ -192,23 +209,6 @@ bool parseArgs(int argc, char* argv[], Options& opts) {
     return true;
 }
 
-std::string generateOutputPath(const std::string& inputPath, 
-                                const std::string& outputDir,
-                                bool /* useFloat */) {
-    fs::path input(inputPath);
-    std::string baseName = input.stem().string();
-    std::string extension = ".wav";
-    
-    fs::path output;
-    if (outputDir.empty()) {
-        output = input.parent_path() / (baseName + extension);
-    } else {
-        output = fs::path(outputDir) / (baseName + extension);
-    }
-    
-    return output.string();
-}
-
 void workerThread(const Options& opts,
                   std::queue<std::string>& taskQueue,
                   std::mutex& queueMutex,
@@ -251,7 +251,7 @@ void workerThread(const Options& opts,
             currentIndex = ++taskIndex;  // Atomic increment for correct ordering
         }
         
-        std::string outputPath = generateOutputPath(midiFile, opts.outputDir, opts.useFloat);
+        std::string outputPath = generateOutputPath(midiFile, opts.outputDir, opts.containerFormat);
         
         auto startTime = std::chrono::high_resolution_clock::now();
         
@@ -335,6 +335,7 @@ int main(int argc, char* argv[]) {
                   << "Jobs: " << opts.jobs << "\n"
                   << "Sample rate: " << opts.sampleRate << " Hz\n"
                   << "Format: " << (opts.useFloat ? "float32" : "int16") << "\n"
+                  << "Container: " << containerFormatName(opts.containerFormat) << "\n"
                   << "Gain: " << opts.gain << "\n"
                   << "Reverb: " << (opts.reverb ? "enabled" : "disabled") << "\n"
                   << "Chorus: " << (opts.chorus ? "enabled" : "disabled") << "\n\n";

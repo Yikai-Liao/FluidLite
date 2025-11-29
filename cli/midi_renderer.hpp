@@ -15,7 +15,6 @@
 #include <functional>
 #include <memory>
 #include <stdexcept>
-#include <fstream>
 
 // FluidLite C API
 extern "C" {
@@ -24,6 +23,10 @@ extern "C" {
 
 // MiniMidi for MIDI parsing
 #include "minimidi/MiniMidi.hpp"
+
+#include "output_format.hpp"
+
+#include <sndfile.h>
 
 namespace fluidlite_cli {
 
@@ -151,7 +154,7 @@ private:
      * @brief Render samples and write to file
      * @return Number of samples rendered
      */
-    size_t renderAndWrite(size_t numSamples, std::ofstream& outFile);
+    size_t renderAndWrite(size_t numSamples, SNDFILE* sndFile);
     
     /**
      * @brief Reset the synthesizer state
@@ -170,7 +173,9 @@ private:
  * @param suffix Optional suffix (default: ".pcm")
  * @return Generated output path
  */
-std::string generateOutputPath(const std::string& inputPath, const std::string& suffix = ".pcm");
+std::string generateOutputPath(const std::string& inputPath,
+                               const std::string& outputDir,
+                               ContainerFormat format);
 
 } // namespace fluidlite_cli
 

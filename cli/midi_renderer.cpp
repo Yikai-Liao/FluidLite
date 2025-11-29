@@ -8,48 +8,48 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
+#include <memory>
+
+#include <sndfile.h>
 
 namespace fluidlite_cli {
 
-// WAV file header structure (44 bytes)
-#pragma pack(push, 1)
-struct WavHeader {
-    // RIFF chunk
-    char riffId[4] = {'R', 'I', 'F', 'F'};
-    uint32_t fileSize = 0;  // File size - 8
-    char waveId[4] = {'W', 'A', 'V', 'E'};
-    
-    // fmt chunk
-    char fmtId[4] = {'f', 'm', 't', ' '};
-    uint32_t fmtSize = 16;
-    uint16_t audioFormat = 1;  // 1 = PCM, 3 = IEEE float
-    uint16_t numChannels = 2;
-    uint32_t sampleRate = 44100;
-    uint32_t byteRate = 0;     // sampleRate * numChannels * bitsPerSample/8
-    uint16_t blockAlign = 0;   // numChannels * bitsPerSample/8
-    uint16_t bitsPerSample = 16;
-    
-    // data chunk
-    char dataId[4] = {'d', 'a', 't', 'a'};
-    uint32_t dataSize = 0;     // Actual audio data size
+namespace {
+
+struct SndFileDeleter {
+    void operator()(SNDFILE* file) const {
+        if (file) {
+            sf_close(file);
+        }
+    }
 };
-#pragma pack(pop)
 
-static_assert(sizeof(WavHeader) == 44, "WavHeader must be 44 bytes");
+struct ContainerFormatInfo {
+    int format = SF_FORMAT_WAV;
+    bool allowPcmTag = true;
+};
 
-void writeWavHeader(std::ofstream& file, const AudioFormat& format, uint32_t dataSize) {
-    WavHeader header;
-    header.audioFormat = format.useFloat ? 3 : 1;  // 3 = IEEE float, 1 = PCM
-    header.numChannels = format.channels;
-    header.sampleRate = format.sampleRate;
-    header.bitsPerSample = format.useFloat ? 32 : 16;
-    header.blockAlign = header.numChannels * header.bitsPerSample / 8;
-    header.byteRate = header.sampleRate * header.blockAlign;
-    header.dataSize = dataSize;
-    header.fileSize = 36 + dataSize;  // Total file size - 8 (RIFF header)
-    
-    file.write(reinterpret_cast<const char*>(&header), sizeof(header));
+ContainerFormatInfo containerFormatInfo(ContainerFormat format) {
+    switch (format) {
+        case ContainerFormat::Flac:
+            return {SF_FORMAT_FLAC, true};
+        case ContainerFormat::Ogg:
+            return {SF_FORMAT_OGG | SF_FORMAT_VORBIS, false};
+        case ContainerFormat::Aiff:
+            return {SF_FORMAT_AIFF, true};
+        case ContainerFormat::Au:
+            return {SF_FORMAT_AU, true};
+        case ContainerFormat::Mp3:
+            return {SF_FORMAT_MPEG | SF_FORMAT_MPEG_LAYER_III, false};
+        case ContainerFormat::Wav:
+        case ContainerFormat::Unknown:
+        default:
+            return {SF_FORMAT_WAV, true};
+    }
 }
+
+} // namespace
 
 MidiRenderer::MidiRenderer(const std::string& soundfontPath, const AudioFormat& format)
     : format_(format)
@@ -146,34 +146,44 @@ void MidiRenderer::reset() {
     }
 }
 
-size_t MidiRenderer::renderAndWrite(size_t numSamples, std::ofstream& outFile) {
-    if (numSamples == 0) return 0;
-    
+size_t MidiRenderer::renderAndWrite(size_t numSamples, SNDFILE* sndFile) {
+    if (numSamples == 0 || !sndFile) {
+        return 0;
+    }
+
     size_t totalRendered = 0;
-    
+
     while (numSamples > 0) {
         size_t toRender = std::min(numSamples, RENDER_CHUNK_SIZE);
-        
+
         if (format_.useFloat) {
             fluid_synth_write_float(synth_, static_cast<int>(toRender),
                                     floatBuffer_.data(), 0, format_.channels,
                                     floatBuffer_.data(), 1, format_.channels);
-            
-            size_t bytes = toRender * format_.channels * sizeof(float);
-            outFile.write(reinterpret_cast<const char*>(floatBuffer_.data()), bytes);
+
+            sf_count_t framesWritten = sf_writef_float(sndFile, floatBuffer_.data(),
+                                                       static_cast<sf_count_t>(toRender));
+            if (framesWritten != static_cast<sf_count_t>(toRender)) {
+                throw std::runtime_error(std::string("libsndfile write error: ") +
+                                         sf_strerror(sndFile));
+            }
         } else {
             fluid_synth_write_s16(synth_, static_cast<int>(toRender),
                                   int16Buffer_.data(), 0, format_.channels,
                                   int16Buffer_.data(), 1, format_.channels);
-            
-            size_t bytes = toRender * format_.channels * sizeof(int16_t);
-            outFile.write(reinterpret_cast<const char*>(int16Buffer_.data()), bytes);
+
+            sf_count_t framesWritten = sf_writef_short(sndFile, int16Buffer_.data(),
+                                                        static_cast<sf_count_t>(toRender));
+            if (framesWritten != static_cast<sf_count_t>(toRender)) {
+                throw std::runtime_error(std::string("libsndfile write error: ") +
+                                         sf_strerror(sndFile));
+            }
         }
-        
+
         totalRendered += toRender;
         numSamples -= toRender;
     }
-    
+
     return totalRendered;
 }
 
@@ -193,15 +203,36 @@ RenderResult MidiRenderer::renderToFile(const std::string& midiPath,
         // Load MIDI file
         auto midi = MidiFile<>::from_file(midiPath);
         
-        // Open output file
-        std::ofstream outFile(outputPath, std::ios::binary);
-        if (!outFile) {
-            result.error = "Failed to open output file: " + outputPath;
+        std::string extension;
+        size_t dotPos = outputPath.rfind('.');
+        if (dotPos != std::string::npos) {
+            extension = outputPath.substr(dotPos);
+        }
+
+        ContainerFormat container = containerFormatFromExtension(extension);
+        if (container == ContainerFormat::Unknown) {
+            container = ContainerFormat::Wav;
+        }
+
+        ContainerFormatInfo formatInfo = containerFormatInfo(container);
+
+        SF_INFO sfInfo{};
+        sfInfo.samplerate = static_cast<int>(format_.sampleRate);
+        sfInfo.channels = static_cast<int>(format_.channels);
+        sfInfo.format = formatInfo.format;
+        if (formatInfo.allowPcmTag) {
+            int sampleTag = format_.useFloat ? SF_FORMAT_FLOAT : SF_FORMAT_PCM_16;
+            sfInfo.format |= sampleTag;
+        }
+
+        std::unique_ptr<SNDFILE, SndFileDeleter> sndFile(
+            sf_open(outputPath.c_str(), SFM_WRITE, &sfInfo), SndFileDeleter{});
+        if (!sndFile) {
+            const char* errorMsg = sf_strerror(nullptr);
+            result.error = "Failed to open output file: " + outputPath +
+                           " (" + (errorMsg ? errorMsg : "unknown") + ")";
             return result;
         }
-        
-        // Write placeholder WAV header (will update at the end)
-        writeWavHeader(outFile, format_, 0);
         
         // Collect all events from all tracks with absolute time
         // Note: In MiniMidi, msg.time is already absolute time (not delta time)
@@ -271,7 +302,7 @@ RenderResult MidiRenderer::renderToFile(const std::string& midiPath,
                 size_t samplesToRender = static_cast<size_t>(deltaTicks * secondsPerTick * format_.sampleRate);
                 
                 if (samplesToRender > 0) {
-                    totalSamplesRendered += renderAndWrite(samplesToRender, outFile);
+                    totalSamplesRendered += renderAndWrite(samplesToRender, sndFile.get());
                 }
             }
             
@@ -304,17 +335,11 @@ RenderResult MidiRenderer::renderToFile(const std::string& midiPath,
         // Render remaining audio (note release, reverb tail, etc.)
         // Add 2 seconds of tail
         size_t tailSamples = format_.sampleRate * 2;
-        totalSamplesRendered += renderAndWrite(tailSamples, outFile);
+        totalSamplesRendered += renderAndWrite(tailSamples, sndFile.get());
         
         if (callback) {
             callback(totalSamplesRendered, totalSamplesRendered);
         }
-        
-        // Update WAV header with actual data size
-        size_t bytesPerSample = format_.useFloat ? sizeof(float) : sizeof(int16_t);
-        uint32_t dataSize = static_cast<uint32_t>(totalSamplesRendered * format_.channels * bytesPerSample);
-        outFile.seekp(0, std::ios::beg);
-        writeWavHeader(outFile, format_, dataSize);
         
         // Calculate statistics
         result.samplesRendered = totalSamplesRendered;
@@ -417,13 +442,24 @@ void MidiRenderer::setGain(float gain) {
     }
 }
 
-std::string generateOutputPath(const std::string& inputPath, const std::string& suffix) {
-    // Find the last dot in the filename
-    size_t dotPos = inputPath.rfind('.');
-    if (dotPos == std::string::npos) {
-        return inputPath + suffix;
+std::string generateOutputPath(const std::string& inputPath,
+                               const std::string& outputDir,
+                               ContainerFormat format) {
+    namespace fs = std::filesystem;
+
+    fs::path input(inputPath);
+    std::string baseName = input.stem().string();
+    std::string extension = containerFormatExtension(format);
+
+    fs::path targetDir;
+    if (outputDir.empty()) {
+        targetDir = input.parent_path();
+    } else {
+        targetDir = fs::path(outputDir);
     }
-    return inputPath.substr(0, dotPos) + suffix;
+
+    fs::path outputPath = targetDir / (baseName + extension);
+    return outputPath.string();
 }
 
 } // namespace fluidlite_cli

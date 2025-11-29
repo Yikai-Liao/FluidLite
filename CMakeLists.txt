@@ -324,6 +324,17 @@ install(FILES
 
 # CLI tool
 if(FLUIDLITE_BUILD_CLI)
+    add_subdirectory(minimidi)
+
+    set(BUILD_PROGRAMS OFF CACHE BOOL "Disable libsndfile helper programs" FORCE)
+    set(BUILD_EXAMPLES OFF CACHE BOOL "Disable libsndfile examples" FORCE)
+    set(BUILD_TESTING OFF CACHE BOOL "Disable libsndfile tests" FORCE)
+    set(ENABLE_CPACK OFF CACHE BOOL "Disable libsndfile CPack packaging" FORCE)
+    set(ENABLE_PACKAGE_CONFIG OFF CACHE BOOL "Disable libsndfile config generation" FORCE)
+    set(INSTALL_PKGCONFIG_MODULE OFF CACHE BOOL "Disable libsndfile pkg-config install" FORCE)
+    set(INSTALL_MANPAGES OFF CACHE BOOL "Skip libsndfile man pages" FORCE)
+    add_subdirectory(libsndfile EXCLUDE_FROM_ALL)
+
     # CLI source files
     set(CLI_SOURCES
         cli/main.cpp
@@ -340,8 +351,12 @@ if(FLUIDLITE_BUILD_CLI)
 
     target_include_directories(${PROJECT_NAME}-cli PRIVATE
         ${PROJECT_SOURCE_DIR}/include
-        ${PROJECT_SOURCE_DIR}/minimidi/include
         ${PROJECT_BINARY_DIR}
+    )
+
+    target_link_libraries(${PROJECT_NAME}-cli PRIVATE
+        minimidi::minimidi
+        SndFile::sndfile
     )
 
     # Link against static library if available, otherwise shared
