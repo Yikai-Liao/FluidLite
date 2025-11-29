@@ -2266,8 +2266,8 @@ fluid_synth_one_block(fluid_synth_t* synth, int do_not_mix_fx_to_out)
   fluid_real_t* reverb_buf;
   fluid_real_t* chorus_buf;
   int byte_size = FLUID_BUFSIZE * sizeof(fluid_real_t);
-
-/*   fluid_mutex_lock(synth->busy); /\* Here comes the audio thread. Lock the synth. *\/ */
+  int active_processed = 0;
+  int total_active = synth->active_voice_count;
 
   /* clean the audio buffers */
   for (i = 0; i < synth->nbuf; i++) {
@@ -2289,9 +2289,14 @@ fluid_synth_one_block(fluid_synth_t* synth, int do_not_mix_fx_to_out)
 
   /* call all playing synthesis processes */
   for (i = 0; i < synth->polyphony; i++) {
+    if (active_processed >= total_active) {
+      break;
+    }
+
     voice = synth->voice[i];
 
     if (_PLAYING(voice)) {
+      active_processed++;
       /* The output associated with a MIDI channel is wrapped around
        * using the number of audio groups as modulo divider.  This is
        * typically the number of output channels on the 'sound card',
@@ -2359,8 +2364,6 @@ fluid_synth_one_block(fluid_synth_t* synth, int do_not_mix_fx_to_out)
 #if 0
   {float num=1;while (num != 0){num*=0.5;};};
 #endif
-
-/*   fluid_mutex_unlock(synth->busy); /\* Allow other threads to touch the synth *\/ */
 
   return 0;
 }
@@ -2459,14 +2462,42 @@ fluid_synth_alloc_voice(fluid_synth_t* synth, fluid_sample_t* sample, int chan, 
   fluid_voice_t* voice = NULL;
   fluid_channel_t* channel = NULL;
 
-/*   fluid_mutex_lock(synth->busy); /\* Don't interfere with the audio thread *\/ */
-/*   fluid_mutex_unlock(synth->busy); */
-
   /* check if there's an available synthesis process */
   for (i = 0; i < synth->polyphony; i++) {
     if (_AVAILABLE(synth->voice[i])) {
       voice = synth->voice[i];
       break;
+    }
+  }
+
+  /* Try to grow the pool before killing an active voice */
+  if (voice == NULL) {
+    int old_polyphony = synth->polyphony;
+    int new_polyphony = synth->polyphony * 2;
+    if (new_polyphony < old_polyphony + 1) {
+      new_polyphony = old_polyphony + 1;
+    }
+
+    fluid_voice_t** new_voices = (fluid_voice_t**) realloc(synth->voice, new_polyphony * sizeof(fluid_voice_t*));
+    if (new_voices != NULL) {
+      synth->voice = new_voices;
+      synth->polyphony = new_polyphony;
+      synth->nvoice = new_polyphony;
+      FLUID_LOG(FLUID_INFO, "polyphony grow: %d -> %d", old_polyphony, new_polyphony);
+      for (i = old_polyphony; i < new_polyphony; i++) {
+	synth->voice[i] = new_fluid_voice(synth->sample_rate);
+	if (synth->voice[i] == NULL) {
+	  synth->polyphony = i;
+	  synth->nvoice = i;
+	  break;
+	}
+      }
+      if (i > old_polyphony) {
+	voice = synth->voice[old_polyphony];
+	FLUID_LOG(FLUID_INFO, "polyphony initialized up to %d, allocate voice %d", synth->polyphony, old_polyphony);
+      }
+    } else {
+      FLUID_LOG(FLUID_WARN, "polyphony grow failed: requested %d", new_polyphony);
     }
   }
 
