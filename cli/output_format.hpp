@@ -14,7 +14,7 @@ enum class ContainerFormat {
     Ogg,
     Aiff,
     Au,
-    Mp3
+    // Mp3 support removed
 };
 
 inline std::string toLowerCase(std::string input) {
@@ -41,9 +41,7 @@ inline ContainerFormat containerFormatFromName(std::string name) {
     if (name == "au") {
         return ContainerFormat::Au;
     }
-    if (name == "mp3") {
-        return ContainerFormat::Mp3;
-    }
+    // MP3 intentionally not recognized anymore
 
     return ContainerFormat::Unknown;
 }
@@ -65,8 +63,6 @@ inline const char* containerFormatExtension(ContainerFormat format) {
             return ".aiff";
         case ContainerFormat::Au:
             return ".au";
-        case ContainerFormat::Mp3:
-            return ".mp3";
         case ContainerFormat::Wav:
         case ContainerFormat::Unknown:
         default:
@@ -84,8 +80,6 @@ inline const char* containerFormatName(ContainerFormat format) {
             return "aiff";
         case ContainerFormat::Au:
             return "au";
-        case ContainerFormat::Mp3:
-            return "mp3";
         case ContainerFormat::Wav:
         case ContainerFormat::Unknown:
         default:

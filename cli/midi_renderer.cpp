@@ -40,8 +40,6 @@ ContainerFormatInfo containerFormatInfo(ContainerFormat format) {
             return {SF_FORMAT_AIFF, true};
         case ContainerFormat::Au:
             return {SF_FORMAT_AU, true};
-        case ContainerFormat::Mp3:
-            return {SF_FORMAT_MPEG | SF_FORMAT_MPEG_LAYER_III, false};
         case ContainerFormat::Wav:
         case ContainerFormat::Unknown:
         default:
@@ -66,7 +64,10 @@ MidiRenderer::MidiRenderer(const std::string& soundfontPath, const AudioFormat& 
     
     // Configure settings
     fluid_settings_setnum(settings_, "synth.sample-rate", static_cast<double>(format_.sampleRate));
-    fluid_settings_setint(settings_, "synth.audio-channels", format_.channels == 2 ? 1 : format_.channels);
+    // Ensure the synthesizer is configured with the correct number of audio channels.
+    // Previously this incorrectly set stereo (2) -> 1 which produced malformed output
+    // for some encoders (notably MP3). Use the actual channel count from AudioFormat.
+    fluid_settings_setint(settings_, "synth.audio-channels", static_cast<int>(format_.channels));
     
     // Create synthesizer
     synth_ = new_fluid_synth(settings_);

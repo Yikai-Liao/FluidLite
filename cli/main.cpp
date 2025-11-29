@@ -82,7 +82,7 @@ void printUsage(const char* programName) {
               << "  -j, --jobs <n>         Number of parallel jobs (default: 1)\n"
               << "  -r, --rate <hz>        Sample rate (default: 44100)\n"
               << "  -f, --format <fmt>     Output sample format: f32 or s16 (default: s16)\n"
-              << "  -Z, --container <fmt>  Output container (wav, flac, ogg, aiff, au, mp3)\n"
+              << "  -Z, --container <fmt>  Output container (wav, flac, ogg, aiff, au)\n"
               << "                         (default: wav)\n"
               << "  -g, --gain <value>     Master gain 0.0-10.0 (default: 0.2)\n"
               << "  --no-reverb            Disable reverb\n"
