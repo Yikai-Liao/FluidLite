@@ -1,9 +1,18 @@
-cmake_minimum_required(VERSION 3.1...3.10)
+cmake_minimum_required(VERSION 3.14...3.28)
 
 project(fluidlite
-    LANGUAGES C
+    LANGUAGES C CXX
     VERSION 1.2.2
 )
+
+# C++ standard for CLI tool
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Default to Release build for performance
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
 
 include(GNUInstallDirs)
 
@@ -13,6 +22,7 @@ option(ENABLE_SF3 "Enable SF3 files (ogg/vorbis compressed samples)" FALSE)
 option(STB_VORBIS "Use stb_vorbis library instead of libogg/libvorbis" FALSE)
 option(WITH_FLOAT "Use 32 bit float type samples (instead of 64 bit double type)" TRUE)
 option(CMAKE_POSITION_INDEPENDENT_CODE "Use PIC for building all sources" TRUE)
+option(FLUIDLITE_BUILD_CLI "Build the fluidlite-cli command line tool" TRUE)
 
 string(TOLOWER "${CMAKE_BUILD_TYPE}" LOWERCASE_BUILD_TYPE)
 if("${LOWERCASE_BUILD_TYPE}" STREQUAL "debug")
@@ -301,3 +311,47 @@ install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}-config-version.cmake"
 	DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}
 )
+
+# CLI tool
+if(FLUIDLITE_BUILD_CLI)
+    # CLI source files
+    set(CLI_SOURCES
+        cli/main.cpp
+        cli/midi_renderer.cpp
+    )
+
+    add_executable(${PROJECT_NAME}-cli ${CLI_SOURCES})
+    
+    set_target_properties(${PROJECT_NAME}-cli PROPERTIES
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+        OUTPUT_NAME "fluidlite-cli"
+    )
+
+    target_include_directories(${PROJECT_NAME}-cli PRIVATE
+        ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/minimidi/include
+        ${PROJECT_BINARY_DIR}
+    )
+
+    # Link against static library if available, otherwise shared
+    if(FLUIDLITE_BUILD_STATIC)
+        target_link_libraries(${PROJECT_NAME}-cli PRIVATE ${PROJECT_NAME}-static)
+    elseif(FLUIDLITE_BUILD_SHARED)
+        target_link_libraries(${PROJECT_NAME}-cli PRIVATE ${PROJECT_NAME})
+    endif()
+
+    # Link pthread for multi-threading
+    find_package(Threads REQUIRED)
+    target_link_libraries(${PROJECT_NAME}-cli PRIVATE Threads::Threads)
+
+    # Install CLI
+    install(TARGETS ${PROJECT_NAME}-cli
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
+endif()
+# Apply custom FLUID_BUFSIZE if specified
+if(NOT FLUID_BUFSIZE EQUAL 64)
+    message(STATUS "Custom FLUID_BUFSIZE: ${FLUID_BUFSIZE}")
+    target_compile_definitions(${PROJECT_NAME}-options INTERFACE FLUID_BUFSIZE=${FLUID_BUFSIZE})
+endif()
