@@ -164,7 +164,9 @@ typedef struct _fluid_client_t fluid_client_t;
  *                      CONSTANTS
  */
 
+#ifndef FLUID_BUFSIZE
 #define FLUID_BUFSIZE                64
+#endif
 
 #ifndef PI
 #define PI                          3.141592654

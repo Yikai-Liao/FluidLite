@@ -203,6 +203,14 @@ fluid_dsp_float_interpolate_linear (fluid_voice_t *voice)
   fluid_real_t *coeffs;
   int looping;
 
+#define ADVANCE_SAMPLE()                                 \
+  do {                                                   \
+    fluid_phase_incr (dsp_phase, dsp_phase_incr);        \
+    dsp_phase_index = fluid_phase_index (dsp_phase);     \
+    dsp_amp += dsp_amp_incr;                             \
+    dsp_i++;                                             \
+  } while (0)
+
   /* Convert playback "speed" floating point value to phase index/fract */
   fluid_phase_set_float (dsp_phase_incr, voice->phase_incr);
 
@@ -328,97 +336,92 @@ fluid_dsp_float_interpolate_4th_order (fluid_voice_t *voice)
     end_point2 = end_point1;
   }
 
-  while (1)
+  while (dsp_i < FLUID_BUFSIZE)
   {
     dsp_phase_index = fluid_phase_index (dsp_phase);
 
-    /* interpolate first sample point (start or loop start) if needed */
-    for ( ; dsp_phase_index == start_index && dsp_i < FLUID_BUFSIZE; dsp_i++)
+    /* fast path: only run while we have safe margins on both sides */
+    while (dsp_i < FLUID_BUFSIZE)
+    {
+      if (dsp_phase_index <= start_index || dsp_phase_index > end_index)
+	break;
+
+      coeffs = interp_coeff[fluid_phase_fract_to_tablerow (dsp_phase)];
+      {
+	short *base = dsp_data + dsp_phase_index - 1;
+	dsp_buf[dsp_i] = dsp_amp * (coeffs[0] * base[0]
+				    + coeffs[1] * base[1]
+				    + coeffs[2] * base[2]
+				    + coeffs[3] * base[3]);
+      }
+
+      ADVANCE_SAMPLE();
+    }
+
+    if (dsp_i >= FLUID_BUFSIZE)
+      break;
+
+    /* handle very first point (needs virtual sample before data) */
+    if (dsp_phase_index == start_index)
     {
       coeffs = interp_coeff[fluid_phase_fract_to_tablerow (dsp_phase)];
       dsp_buf[dsp_i] = dsp_amp * (coeffs[0] * start_point
 				  + coeffs[1] * dsp_data[dsp_phase_index]
 				  + coeffs[2] * dsp_data[dsp_phase_index+1]
 				  + coeffs[3] * dsp_data[dsp_phase_index+2]);
-
-      /* increment phase and amplitude */
-      fluid_phase_incr (dsp_phase, dsp_phase_incr);
-      dsp_phase_index = fluid_phase_index (dsp_phase);
-      dsp_amp += dsp_amp_incr;
+      ADVANCE_SAMPLE();
+      continue;
     }
 
-    /* interpolate the sequence of sample points */
-    for ( ; dsp_i < FLUID_BUFSIZE && dsp_phase_index <= end_index; dsp_i++)
+    /* near the end: reuse the old slow-path logic */
     {
-      coeffs = interp_coeff[fluid_phase_fract_to_tablerow (dsp_phase)];
-      dsp_buf[dsp_i] = dsp_amp * (coeffs[0] * dsp_data[dsp_phase_index-1]
-				  + coeffs[1] * dsp_data[dsp_phase_index]
-				  + coeffs[2] * dsp_data[dsp_phase_index+1]
-				  + coeffs[3] * dsp_data[dsp_phase_index+2]);
+      unsigned int guard = end_index + 1; /* 2nd-to-last */
 
-      /* increment phase and amplitude */
-      fluid_phase_incr (dsp_phase, dsp_phase_incr);
-      dsp_phase_index = fluid_phase_index (dsp_phase);
-      dsp_amp += dsp_amp_incr;
-    }
-
-    /* break out if buffer filled */
-    if (dsp_i >= FLUID_BUFSIZE) break;
-
-    end_index++;	/* we're now interpolating the 2nd to last point */
-
-    /* interpolate within 2nd to last point */
-    for (; dsp_phase_index <= end_index && dsp_i < FLUID_BUFSIZE; dsp_i++)
-    {
-      coeffs = interp_coeff[fluid_phase_fract_to_tablerow (dsp_phase)];
-      dsp_buf[dsp_i] = dsp_amp * (coeffs[0] * dsp_data[dsp_phase_index-1]
-				  + coeffs[1] * dsp_data[dsp_phase_index]
-				  + coeffs[2] * dsp_data[dsp_phase_index+1]
-				  + coeffs[3] * end_point1);
-
-      /* increment phase and amplitude */
-      fluid_phase_incr (dsp_phase, dsp_phase_incr);
-      dsp_phase_index = fluid_phase_index (dsp_phase);
-      dsp_amp += dsp_amp_incr;
-    }
-
-    end_index++;	/* we're now interpolating the last point */
-
-    /* interpolate within the last point */
-    for (; dsp_phase_index <= end_index && dsp_i < FLUID_BUFSIZE; dsp_i++)
-    {
-      coeffs = interp_coeff[fluid_phase_fract_to_tablerow (dsp_phase)];
-      dsp_buf[dsp_i] = dsp_amp * (coeffs[0] * dsp_data[dsp_phase_index-1]
-				  + coeffs[1] * dsp_data[dsp_phase_index]
-				  + coeffs[2] * end_point1
-				  + coeffs[3] * end_point2);
-
-      /* increment phase and amplitude */
-      fluid_phase_incr (dsp_phase, dsp_phase_incr);
-      dsp_phase_index = fluid_phase_index (dsp_phase);
-      dsp_amp += dsp_amp_incr;
-    }
-
-    if (!looping) break;	/* break out if not looping (end of sample) */
-
-    /* go back to loop start */
-    if (dsp_phase_index > end_index)
-    {
-      fluid_phase_sub_int (dsp_phase, voice->loopend - voice->loopstart);
-
-      if (!voice->has_looped)
+      while (dsp_phase_index <= guard && dsp_i < FLUID_BUFSIZE)
       {
-	voice->has_looped = 1;
-	start_index = voice->loopstart;
-	start_point = dsp_data[voice->loopend - 1];
+	coeffs = interp_coeff[fluid_phase_fract_to_tablerow (dsp_phase)];
+	dsp_buf[dsp_i] = dsp_amp * (coeffs[0] * dsp_data[dsp_phase_index-1]
+				    + coeffs[1] * dsp_data[dsp_phase_index]
+				    + coeffs[2] * dsp_data[dsp_phase_index+1]
+				    + coeffs[3] * end_point1);
+	ADVANCE_SAMPLE();
       }
+
+      guard++;	/* move to last point */
+
+      while (dsp_phase_index <= guard && dsp_i < FLUID_BUFSIZE)
+      {
+	coeffs = interp_coeff[fluid_phase_fract_to_tablerow (dsp_phase)];
+	dsp_buf[dsp_i] = dsp_amp * (coeffs[0] * dsp_data[dsp_phase_index-1]
+				    + coeffs[1] * dsp_data[dsp_phase_index]
+				    + coeffs[2] * end_point1
+				    + coeffs[3] * end_point2);
+	ADVANCE_SAMPLE();
+      }
+
+      if (!looping)
+	break;
+
+      if (dsp_phase_index > guard)
+      {
+	fluid_phase_sub_int (dsp_phase, voice->loopend - voice->loopstart);
+
+	if (!voice->has_looped)
+	{
+	  voice->has_looped = 1;
+	  start_index = voice->loopstart;
+	  start_point = dsp_data[voice->loopend - 1];
+	}
+      }
+
+      if (dsp_i >= FLUID_BUFSIZE)
+	break;
+
+      end_index = guard - 2;
     }
-
-    /* break out if filled buffer */
-    if (dsp_i >= FLUID_BUFSIZE) break;
-
-    end_index -= 2;	/* set end back to third to last sample point */
   }
+
+#undef ADVANCE_SAMPLE
 
   voice->phase = dsp_phase;
   voice->amp = dsp_amp;

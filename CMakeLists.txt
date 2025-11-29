@@ -24,6 +24,10 @@ option(WITH_FLOAT "Use 32 bit float type samples (instead of 64 bit double type)
 option(CMAKE_POSITION_INDEPENDENT_CODE "Use PIC for building all sources" TRUE)
 option(FLUIDLITE_BUILD_CLI "Build the fluidlite-cli command line tool" TRUE)
 
+# Buffer size for audio processing (samples per block)
+# Default is 64 for low-latency real-time. For offline rendering, larger values (256, 512, 1024) can improve performance.
+set(FLUID_BUFSIZE 64 CACHE STRING "Audio buffer size in samples (64, 256, 512, 1024)")
+
 string(TOLOWER "${CMAKE_BUILD_TYPE}" LOWERCASE_BUILD_TYPE)
 if("${LOWERCASE_BUILD_TYPE}" STREQUAL "debug")
     set(DEBUG TRUE)
@@ -99,6 +103,12 @@ configure_file(src/fluid_config.cmake ${PROJECT_BINARY_DIR}/fluid_config.h @ONLY
 add_library(${PROJECT_NAME}-options INTERFACE)
 if(WIN32)
     target_compile_definitions(${PROJECT_NAME}-options INTERFACE _CRT_SECURE_NO_WARNINGS)
+endif()
+
+# Apply custom FLUID_BUFSIZE if specified
+if(NOT FLUID_BUFSIZE EQUAL 64)
+    message(STATUS "Custom FLUID_BUFSIZE: ${FLUID_BUFSIZE}")
+    target_compile_definitions(${PROJECT_NAME}-options INTERFACE FLUID_BUFSIZE=${FLUID_BUFSIZE})
 endif()
 
 target_include_directories(${PROJECT_NAME}-options INTERFACE ${PROJECT_BINARY_DIR})
