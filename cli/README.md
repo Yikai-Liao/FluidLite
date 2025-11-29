@@ -25,7 +25,7 @@ cmake --build . -j$(nproc)
 | `-j, --jobs <n>` | Parallel render jobs | `1` |
 | `-r, --rate <hz>` | Sample rate | `44100` |
 | `-f, --format <fmt>` | Output format: `f32` or `s16` | `s16` |
-| `-Z, --container <fmt>` | Output container: `wav`, `flac`, `ogg`, `aiff`, `au`, `mp3` | `wav` |
+| `-Z, --container <fmt>` | Output container: `wav`, `flac`, `ogg`, `aiff`, `au` | `wav` |
 | `-g, --gain <value>` | Master gain (0.0–10.0) | `0.2` |
 | `--no-reverb` | Disable the built-in reverb | Enabled |
 | `--no-chorus` | Disable chorus | Enabled |
@@ -47,7 +47,7 @@ cmake --build . -j$(nproc)
 
 ## Output
 
-The CLI writes 16-bit PCM or 32-bit float audio files into the selected container (`wav`, `flac`, `ogg`, `aiff`, `au`, or `mp3`). The container maps to file extensions via the `--container` flag, and each output file inherits the MIDI stem name.
+The CLI writes 16-bit PCM or 32-bit float audio files into the selected container (`wav`, `flac`, `ogg`, `aiff`, or `au`). The container maps to file extensions via the `--container` flag, and each output file inherits the MIDI stem name.
 
 ## Dependencies
 
@@ -57,7 +57,7 @@ The CLI writes 16-bit PCM or 32-bit float audio files into the selected containe
 
 ## Format smoke test
 
-Use `scripts/test_cli_formats.sh` to re-render `minimidi/example/mahler.mid` with your local `MuseScore_General.sf3` in every supported container. The script also rebuilds the CLI target so you can rerun the test after fixing issues.
+Use `scripts/test_cli_formats.sh` to re-render `minimidi/example/mahler.mid` with your local `MuseScore_General.sf3` in supported containers. The script also rebuilds the CLI target so you can rerun the test after fixing issues. Note: this repository may be configured to skip or modify certain formats at build time depending on available system codecs.
 
 ## Performance Optimization
 
