@@ -6,8 +6,8 @@
 #include "midi_renderer.hpp"
 
 #include <algorithm>
-#include <cstring>
 #include <cmath>
+#include <cstring>
 
 namespace fluidlite_cli {
 
@@ -122,9 +122,8 @@ MidiRenderer& MidiRenderer::operator=(MidiRenderer&& other) noexcept {
 
 void MidiRenderer::cleanup() {
     if (synth_) {
-        if (soundfontId_ != -1) {
-            fluid_synth_sfunload(synth_, soundfontId_, 1);
-        }
+        // Let delete_fluid_synth tear down the loaded SoundFont and samples;
+        // unloading earlier can leave sample data orphaned.
         delete_fluid_synth(synth_);
         synth_ = nullptr;
     }
